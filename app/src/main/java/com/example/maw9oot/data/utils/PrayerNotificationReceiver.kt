@@ -77,10 +77,10 @@ class PrayerNotificationReceiver : BroadcastReceiver() {
             }
 
 
-            val largeIcon = if (notificationType === "prayer_reminder")
+            val largeIcon = if (notificationType == "prayer_reminder")
                 BitmapFactory.decodeResource(context.resources, Prayer.fromName(prayerName).icon)
             else
-                BitmapFactory.decodeResource(context.resources, R.drawable.baseline_notifications_active_24)
+                BitmapFactory.decodeResource(context.resources, R.drawable.daily)
             val notificationBuilder = NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(R.drawable.mini_logo)
                 .setContentTitle(contentTitle)
