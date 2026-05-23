@@ -142,7 +142,7 @@ class SettingsViewModel @Inject constructor(
     // Prayer Reminder
     fun togglePrayerReminder(enabled: Boolean, delayMinutes: String) {
         val currentDate = Calendar.getInstance().time
-        val dateFormat = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+        val dateFormat = SimpleDateFormat("dd-MM-yyyy", Locale.US)
         val formattedDate = dateFormat.format(currentDate)
 
         viewModelScope.launch {

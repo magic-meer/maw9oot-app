@@ -42,7 +42,7 @@ fun HomeScreen(
     val selectedDate by homeViewModel.selectedDate.observeAsState("")
 
     val calendar = Calendar.getInstance()
-    val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
+    val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(calendar.time)
 
     val currentTimeMillis = System.currentTimeMillis()
     val datePickerState = rememberDatePickerState(initialSelectedDateMillis = currentTimeMillis)
@@ -69,14 +69,14 @@ fun HomeScreen(
                     val prevDate = Calendar.getInstance().apply {
                         time = SimpleDateFormat(
                             "yyyy-MM-dd",
-                            Locale.getDefault()
+                            Locale.US
                         ).parse(selectedDate)!!
                         add(Calendar.DAY_OF_MONTH, -1)
                     }
                     homeViewModel.updateSelectedDate(
                         SimpleDateFormat(
                             "yyyy-MM-dd",
-                            Locale.getDefault()
+                            Locale.US
                         ).format(prevDate.time)
                     )
                 }
@@ -100,12 +100,12 @@ fun HomeScreen(
                     val nextDate = Calendar.getInstance().apply {
                         time = SimpleDateFormat(
                             "yyyy-MM-dd",
-                            Locale.getDefault()
+                            Locale.US
                         ).parse(selectedDate)!!
                         add(Calendar.DAY_OF_MONTH, 1)
                     }
                     val newDate =
-                        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(nextDate.time)
+                        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(nextDate.time)
                     if (newDate <= currentDate) {
                         homeViewModel.updateSelectedDate(newDate)
                     }

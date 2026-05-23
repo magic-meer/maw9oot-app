@@ -32,7 +32,7 @@ class HomeViewModel @Inject constructor(
 
 
     private val _selectedDate = MutableLiveData<String>().apply {
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         value = dateFormat.format(Calendar.getInstance().time)
     }
     val selectedDate: LiveData<String> = _selectedDate
@@ -69,7 +69,7 @@ class HomeViewModel @Inject constructor(
                 PrayerStatus.NONE -> TODO()
             }
 
-            val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Calendar.getInstance().time)
+            val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Calendar.getInstance().time)
             updateStreak(today)
         }
     }
@@ -119,8 +119,8 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun convertToDbDateFormat(appDate: String): String {
-        val appFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val dbFormat = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+        val appFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val dbFormat = SimpleDateFormat("dd-MM-yyyy", Locale.US)
         val date = appFormat.parse(appDate) ?: return appDate
         return dbFormat.format(date)
     }

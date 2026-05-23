@@ -16,8 +16,25 @@ import androidx.core.content.ContextCompat
 import com.example.maw9oot.MainActivity
 import com.example.maw9oot.R
 import com.example.maw9oot.data.enums.Prayer
+import com.example.maw9oot.data.local.DataStoreManager
+import com.example.maw9oot.data.repository.PrayerTimesRepository
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class PrayerNotificationReceiver : BroadcastReceiver() {
+
+    @Inject
+    lateinit var dataStoreManager: DataStoreManager
+
+    @Inject
+    lateinit var prayerTimesRepository: PrayerTimesRepository
 
     override fun onReceive(context: Context, intent: Intent) {
         val notificationType = intent.getStringExtra("notification_type") ?: "prayer_reminder"
@@ -31,9 +48,15 @@ class PrayerNotificationReceiver : BroadcastReceiver() {
                 putExtra("from_notification", true)
                 putExtra("prayer_name", prayerName)
             }
+
+            // Generate a consistent requestCode for the activity intent as well
+            val dateFormat = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+            val formattedDate = dateFormat.format(Calendar.getInstance().time)
+            val requestCode = if (notificationType == "daily") "daily".hashCode() else "${prayerName}_${formattedDate}".hashCode()
+
             val pendingIntent = PendingIntent.getActivity(
                 context,
-                prayerName.hashCode(),
+                requestCode,
                 launchIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -92,6 +115,17 @@ class PrayerNotificationReceiver : BroadcastReceiver() {
 
             with(NotificationManagerCompat.from(context)) {
                 notify(notificationId, notificationBuilder.build())
+            }
+
+            // Reschedule alarms to ensure continuity
+            val pendingResult = goAsync()
+            val scope = CoroutineScope(Dispatchers.IO)
+            scope.launch {
+                try {
+                    rescheduleAllAlarms(context, dataStoreManager, prayerTimesRepository)
+                } finally {
+                    pendingResult.finish()
+                }
             }
         } else {
             Log.d("PrayerNotificationReceiver", "Notification permission not granted")
