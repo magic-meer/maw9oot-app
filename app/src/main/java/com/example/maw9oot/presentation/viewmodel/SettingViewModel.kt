@@ -1,33 +1,24 @@
 package com.example.maw9oot.presentation.viewmodel
 
 import android.content.Context
-import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.maw9oot.data.local.DataStoreManager
-import com.example.maw9oot.data.utils.cancelAllNotifications
 import com.example.maw9oot.data.utils.cancelDailyNotification
-import com.example.maw9oot.data.utils.cancelPrayerReminders
-import com.example.maw9oot.data.utils.scheduleDailyNotification
-import com.example.maw9oot.data.utils.schedulePrayerReminder
+import com.example.maw9oot.data.utils.rescheduleAllAlarms
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.launch
-import java.util.Calendar
 import javax.inject.Inject
 import android.util.Log
-import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import com.example.maw9oot.data.repository.PrayerTimesRepository
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.PermissionState
-import com.google.accompanist.permissions.rememberPermissionState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
-import java.text.SimpleDateFormat
-import java.util.Locale
+import java.time.LocalDate
+import java.util.Calendar
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -49,8 +40,6 @@ class SettingsViewModel @Inject constructor(
     private val _isPrayerTimesSynced = MutableStateFlow(false)
     val isPrayerTimesSynced: StateFlow<Boolean> = _isPrayerTimesSynced
 
-   // val notificationPermission: PermissionState = rememberPermissionState(permission = android.Manifest.permission.POST_NOTIFICATIONS)
-
     init {
         viewModelScope.launch {
             _isPrayerTimesSynced.value = prayerTimesRepository.isPrayerTimesSynced()
@@ -63,13 +52,15 @@ class SettingsViewModel @Inject constructor(
         val year: Int = Calendar.getInstance().get(Calendar.YEAR)
         viewModelScope.launch {
             try {
-                if (!_isPrayerTimesSynced.value) {
-                    prayerTimesRepository.fetchAndStorePrayerTimes(latitude, longitude, year)
-                    _isPrayerTimesSynced.value = prayerTimesRepository.isPrayerTimesSynced()
+                prayerTimesRepository.fetchAndStorePrayerTimes(latitude, longitude, year)
+                _isPrayerTimesSynced.value = prayerTimesRepository.isPrayerTimesSynced()
+
+                // If prayer reminders are enabled, reschedule them with new times
+                if (dataStoreManager.isPrayerReminderEnabled.first()) {
+                    rescheduleAllAlarms(appContext, dataStoreManager, prayerTimesRepository)
                 }
             } catch (e: Exception) {
                 Log.e("SettingsViewModel", "Error syncing prayer times: ${e.message}")
-                _isPrayerTimesSynced.value = false
             }
         }
     }
@@ -95,23 +86,14 @@ class SettingsViewModel @Inject constructor(
         AppCompatDelegate.setApplicationLocales(appLocale)
     }
 
-    // Daily Notification [OK]
+    // Daily Notification
     fun setNotificationTime(time: String) {
         Log.d("SettingsViewModel", "Notification time set to $time")
         viewModelScope.launch {
             dataStoreManager.setNotificationTime(time)
-            val (hour, minute) = time.split(":").map { it.toInt() }
-            val calendar = Calendar.getInstance().apply {
-                timeInMillis = System.currentTimeMillis()
-                set(Calendar.HOUR_OF_DAY, hour)
-                set(Calendar.MINUTE, minute)
-                set(Calendar.SECOND, 0)
-                if (before(Calendar.getInstance())) {
-                    add(Calendar.DAY_OF_YEAR, 1)
-                }
+            if (dataStoreManager.isDailyNotificationEnabled.first()) {
+                rescheduleAllAlarms(appContext, dataStoreManager, prayerTimesRepository)
             }
-            cancelDailyNotification(appContext)
-            scheduleDailyNotification(appContext, calendar)
         }
     }
 
@@ -120,19 +102,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             dataStoreManager.setDailyNotificationEnabled(enabled)
             if (enabled) {
-                val time = dataStoreManager.notificationTime.first()
-                Log.d("SettingsViewModel", "Daily notification time: $time")
-                val (hour, minute) = time.split(":").map { it.toInt() }
-                val calendar = Calendar.getInstance().apply {
-                    timeInMillis = System.currentTimeMillis()
-                    set(Calendar.HOUR_OF_DAY, hour)
-                    set(Calendar.MINUTE, minute)
-                    set(Calendar.SECOND, 0)
-                    if (before(Calendar.getInstance())) {
-                        add(Calendar.DAY_OF_YEAR, 1)
-                    }
-                }
-                scheduleDailyNotification(appContext, calendar)
+                rescheduleAllAlarms(appContext, dataStoreManager, prayerTimesRepository)
             } else {
                 cancelDailyNotification(appContext)
             }
@@ -141,40 +111,11 @@ class SettingsViewModel @Inject constructor(
 
     // Prayer Reminder
     fun togglePrayerReminder(enabled: Boolean, delayMinutes: String) {
-        val currentDate = Calendar.getInstance().time
-        val dateFormat = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-        val formattedDate = dateFormat.format(currentDate)
-
         viewModelScope.launch {
-
             dataStoreManager.setPrayerReminderEnabled(enabled)
             dataStoreManager.setPrayerReminderDelay(delayMinutes)
-
-            if (enabled) {
-                val delay = delayMinutes.toIntOrNull() ?: 15
-                val prayerTimes = prayerTimesRepository.getPrayerTimesForDate(formattedDate)
-
-
-                if (prayerTimes.isNotEmpty()) {
-                    cancelPrayerReminders(appContext)
-                    for (prayerTime in prayerTimes) {
-                        val calendar = Calendar.getInstance().apply {
-                            val time = prayerTime.time.split(" ")[0]
-                            val timeParts = time.split(":")
-                            if (timeParts.size == 2) {
-                                set(Calendar.HOUR_OF_DAY, timeParts[0].toInt())
-                                set(Calendar.MINUTE, timeParts[1].toInt())
-                                set(Calendar.SECOND, 0)
-                            }
-                        }
-                        schedulePrayerReminder(appContext, calendar, delay, prayerTime.prayerName)
-                    }
-                } else {
-                    Log.e("PrayerReminder", "No prayer times found for $formattedDate")
-                }
-            } else {
-                cancelPrayerReminders(appContext)
-            }
+            // Always use the robust rescheduleAllAlarms which handles both enable/disable and data fetching
+            rescheduleAllAlarms(appContext, dataStoreManager, prayerTimesRepository)
         }
     }
 
@@ -183,8 +124,9 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             dataStoreManager.setPrayerReminderDelay(delay)
             Log.d("SettingsViewModel", "Prayer reminder delay set to $delay")
-            val enabled = dataStoreManager.isPrayerReminderEnabled.first()
-            togglePrayerReminder(enabled, delay)
+            if (dataStoreManager.isPrayerReminderEnabled.first()) {
+                rescheduleAllAlarms(appContext, dataStoreManager, prayerTimesRepository)
+            }
         }
     }
 

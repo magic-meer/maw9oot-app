@@ -10,18 +10,32 @@ import android.util.Log
 import com.example.maw9oot.data.local.DataStoreManager
 import com.example.maw9oot.data.repository.PrayerTimesRepository
 import kotlinx.coroutines.flow.first
-import java.text.SimpleDateFormat
-import java.util.Calendar
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private const val DAILY_NOTIFICATION_REQUEST_CODE = 1000
 
 // Coordinates for prayer times (Algiers, Algeria)
+// TODO: These should be retrieved from user settings or GPS in a future update
 private const val DEFAULT_LATITUDE = 36.402482
 private const val DEFAULT_LONGITUDE = 3.323412
 
-fun scheduleDailyNotification(context: Context, calendar: Calendar) {
+// Use a fixed formatter for database and internal logic to ensure locale independence
+private val DB_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd-MM-yyyy", Locale.ROOT)
+
+fun scheduleDailyNotification(context: Context, time: LocalTime) {
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    val now = LocalDateTime.now()
+    var scheduledDateTime = LocalDateTime.of(now.toLocalDate(), time)
+
+    if (scheduledDateTime.isBefore(now)) {
+        scheduledDateTime = scheduledDateTime.plusDays(1)
+    }
 
     val intent = Intent(context, PrayerNotificationReceiver::class.java).apply {
         putExtra("notification_type", "daily")
@@ -34,45 +48,43 @@ fun scheduleDailyNotification(context: Context, calendar: Calendar) {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
+    val triggerAtMillis = scheduledDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
         alarmManager.setAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
-            calendar.timeInMillis,
+            triggerAtMillis,
             pendingIntent
         )
-        Log.d("NotificationUtils", "Daily notification scheduled (Inexact) for ${calendar.time}")
+        Log.d("NotificationUtils", "Daily notification scheduled (Inexact) for $scheduledDateTime")
     } else {
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
-            calendar.timeInMillis,
+            triggerAtMillis,
             pendingIntent
         )
-        Log.d("NotificationUtils", "Daily notification scheduled (Exact) for ${calendar.time}")
+        Log.d("NotificationUtils", "Daily notification scheduled (Exact) for $scheduledDateTime")
     }
 }
 
-fun schedulePrayerReminder(context: Context, prayerTime: Calendar, delayMinutes: Int, prayerName: String) {
+fun schedulePrayerReminder(context: Context, date: LocalDate, prayerTime: LocalTime, delayMinutes: Int, prayerName: String) {
+    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-    val reminderTime = prayerTime.clone() as Calendar
-    reminderTime.add(Calendar.MINUTE, delayMinutes)
-    reminderTime.set(Calendar.SECOND, 0)
-    reminderTime.set(Calendar.MILLISECOND, 0)
+    val reminderDateTime = LocalDateTime.of(date, prayerTime).plusMinutes(delayMinutes.toLong())
+    val now = LocalDateTime.now()
 
     // Ensure we are scheduling for the future
-    if (reminderTime.timeInMillis <= System.currentTimeMillis()) {
-        Log.d("NotificationUtils", "Skipping past prayer reminder for $prayerName at ${reminderTime.time}")
+    if (reminderDateTime.isBefore(now)) {
+        Log.d("NotificationUtils", "Skipping past prayer reminder for $prayerName at $reminderDateTime")
         return
     }
-
-    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
     val intent = Intent(context, PrayerNotificationReceiver::class.java).apply {
         putExtra("notification_type", "prayer_reminder")
         putExtra("prayer_name", prayerName)
     }
 
-    val dateFormat = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-    val formattedDate = dateFormat.format(reminderTime.time)
+    val formattedDate = date.format(DB_DATE_FORMATTER)
     val requestCode = "${prayerName}_${formattedDate}".hashCode()
 
     val pendingIntent = PendingIntent.getBroadcast(
@@ -82,20 +94,22 @@ fun schedulePrayerReminder(context: Context, prayerTime: Calendar, delayMinutes:
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
+    val triggerAtMillis = reminderDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
         alarmManager.setAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
-            reminderTime.timeInMillis,
+            triggerAtMillis,
             pendingIntent
         )
-        Log.d("NotificationUtils", "Prayer reminder scheduled (Inexact) for $prayerName at ${reminderTime.time}")
+        Log.d("NotificationUtils", "Prayer reminder scheduled (Inexact) for $prayerName at $reminderDateTime")
     } else {
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
-            reminderTime.timeInMillis,
+            triggerAtMillis,
             pendingIntent
         )
-        Log.d("NotificationUtils", "Prayer reminder scheduled (Exact) for $prayerName at ${reminderTime.time}")
+        Log.d("NotificationUtils", "Prayer reminder scheduled (Exact) for $prayerName at $reminderDateTime")
     }
 }
 
@@ -121,15 +135,11 @@ fun cancelPrayerReminders(context: Context) {
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     val prayers = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
 
-    // We need to cancel for today and tomorrow at least
-    val datesToCancel = listOf(
-        Calendar.getInstance(),
-        Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
-    )
-    val dateFormat = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+    val today = LocalDate.now()
+    val datesToCancel = listOf(today, today.plusDays(1))
 
-    for (dateCalendar in datesToCancel) {
-        val formattedDate = dateFormat.format(dateCalendar.time)
+    for (date in datesToCancel) {
+        val formattedDate = date.format(DB_DATE_FORMATTER)
         for (prayerName in prayers) {
             val requestCode = "${prayerName}_${formattedDate}".hashCode()
             val intent = Intent(context, PrayerNotificationReceiver::class.java).apply {
@@ -166,37 +176,25 @@ suspend fun rescheduleAllAlarms(
     // Schedule Daily Notification
     val isDailyEnabled = dataStoreManager.isDailyNotificationEnabled.first()
     if (isDailyEnabled) {
-        val time = dataStoreManager.notificationTime.first()
+        val timeStr = dataStoreManager.notificationTime.first()
         try {
-            val (hour, minute) = time.split(":").map { it.toInt() }
-            val calendar = Calendar.getInstance().apply {
-                set(Calendar.HOUR_OF_DAY, hour)
-                set(Calendar.MINUTE, minute)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-                if (timeInMillis <= System.currentTimeMillis()) {
-                    add(Calendar.DAY_OF_YEAR, 1)
-                }
-            }
-            scheduleDailyNotification(context, calendar)
+            val time = LocalTime.parse(timeStr, DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT))
+            scheduleDailyNotification(context, time)
         } catch (e: Exception) {
-            Log.e("NotificationUtils", "Error parsing daily notification time: $time", e)
+            Log.e("NotificationUtils", "Error parsing daily notification time: $timeStr", e)
         }
     } else {
         cancelDailyNotification(context)
     }
 
     // Ensure prayer times are synced for today and tomorrow
-    val dateFormat = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-    val datesToSchedule = listOf(
-        Calendar.getInstance(),
-        Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
-    )
+    val today = LocalDate.now()
+    val datesToSchedule = listOf(today, today.plusDays(1))
 
-    for (dateCalendar in datesToSchedule) {
-        val formattedDate = dateFormat.format(dateCalendar.time)
+    for (date in datesToSchedule) {
+        val formattedDate = date.format(DB_DATE_FORMATTER)
         if (prayerTimesRepository.getPrayerTimesForDate(formattedDate).isEmpty()) {
-            val year = dateCalendar.get(Calendar.YEAR)
+            val year = date.year
             try {
                 prayerTimesRepository.fetchAndStorePrayerTimes(DEFAULT_LATITUDE, DEFAULT_LONGITUDE, year)
                 Log.d("NotificationUtils", "Prayer times synced automatically for $formattedDate")
@@ -211,26 +209,16 @@ suspend fun rescheduleAllAlarms(
     if (isPrayerEnabled) {
         val delay = dataStoreManager.prayerReminderDelay.first().toIntOrNull() ?: 15
 
-        for (dateCalendar in datesToSchedule) {
-            val formattedDate = dateFormat.format(dateCalendar.time)
+        for (date in datesToSchedule) {
+            val formattedDate = date.format(DB_DATE_FORMATTER)
             val prayerTimes = prayerTimesRepository.getPrayerTimesForDate(formattedDate)
 
             for (prayerTime in prayerTimes) {
                 try {
                     // Robustly parse time like "05:30 (CET)"
                     val timeStr = prayerTime.time.split(" ")[0]
-                    val timeParts = timeStr.split(":")
-                    if (timeParts.size >= 2) {
-                        val calendar = Calendar.getInstance().apply {
-                            time = dateCalendar.time
-                            set(Calendar.HOUR_OF_DAY, timeParts[0].toInt())
-                            set(Calendar.MINUTE, timeParts[1].toInt())
-                            set(Calendar.SECOND, 0)
-                            set(Calendar.MILLISECOND, 0)
-                        }
-
-                        schedulePrayerReminder(context, calendar, delay, prayerTime.prayerName)
-                    }
+                    val pTime = LocalTime.parse(timeStr, DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT))
+                    schedulePrayerReminder(context, date, pTime, delay, prayerTime.prayerName)
                 } catch (e: Exception) {
                     Log.e("NotificationUtils", "Error parsing prayer time: ${prayerTime.time} for ${prayerTime.prayerName}", e)
                 }

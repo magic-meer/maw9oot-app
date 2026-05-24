@@ -23,10 +23,9 @@ import com.example.maw9oot.data.enums.Prayer
 import com.example.maw9oot.data.enums.PrayerStatus
 import com.example.maw9oot.presentation.viewmodel.HomeViewModel
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.*
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,13 +40,12 @@ fun HomeScreen(
     val prayerTimes by homeViewModel.prayerTimeForDate.observeAsState(emptyMap())
     val selectedDate by homeViewModel.selectedDate.observeAsState("")
 
-    val calendar = Calendar.getInstance()
-    val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(calendar.time)
+    val appDateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT)
+    val currentDate = LocalDate.now().format(appDateFormat)
 
     val currentTimeMillis = System.currentTimeMillis()
     val datePickerState = rememberDatePickerState(initialSelectedDateMillis = currentTimeMillis)
     var showDialog by remember { mutableStateOf(false) }
-    val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
     fun showSheet(prayer: Prayer) {
         homeViewModel.selectPrayer(prayer)
@@ -66,19 +64,12 @@ fun HomeScreen(
         ) {
             IconButton(
                 onClick = {
-                    val prevDate = Calendar.getInstance().apply {
-                        time = SimpleDateFormat(
-                            "yyyy-MM-dd",
-                            Locale.US
-                        ).parse(selectedDate)!!
-                        add(Calendar.DAY_OF_MONTH, -1)
+                    try {
+                        val prevDate = LocalDate.parse(selectedDate, appDateFormat).minusDays(1)
+                        homeViewModel.updateSelectedDate(prevDate.format(appDateFormat))
+                    } catch (e: Exception) {
+                        Log.e("HomeScreen", "Error parsing date: $selectedDate", e)
                     }
-                    homeViewModel.updateSelectedDate(
-                        SimpleDateFormat(
-                            "yyyy-MM-dd",
-                            Locale.US
-                        ).format(prevDate.time)
-                    )
                 }
             ) {
                 Icon(
@@ -97,17 +88,14 @@ fun HomeScreen(
 
             IconButton(
                 onClick = {
-                    val nextDate = Calendar.getInstance().apply {
-                        time = SimpleDateFormat(
-                            "yyyy-MM-dd",
-                            Locale.US
-                        ).parse(selectedDate)!!
-                        add(Calendar.DAY_OF_MONTH, 1)
-                    }
-                    val newDate =
-                        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(nextDate.time)
-                    if (newDate <= currentDate) {
-                        homeViewModel.updateSelectedDate(newDate)
+                    try {
+                        val nextDate = LocalDate.parse(selectedDate, appDateFormat).plusDays(1)
+                        val nextDateStr = nextDate.format(appDateFormat)
+                        if (nextDateStr <= currentDate) {
+                            homeViewModel.updateSelectedDate(nextDateStr)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("HomeScreen", "Error parsing date: $selectedDate", e)
                     }
                 },
                 enabled = selectedDate != currentDate
@@ -159,8 +147,9 @@ fun HomeScreen(
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let { millis ->
+                         // LocalDate.ofEpochDay expects days, millis to days:
                         val newDate = LocalDate.ofEpochDay(millis / (24 * 60 * 60 * 1000))
-                            .format(dateFormatter)
+                            .format(appDateFormat)
                         homeViewModel.updateSelectedDate(newDate)
                     }
                     showDialog = false

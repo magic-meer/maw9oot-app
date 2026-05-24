@@ -14,8 +14,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -23,6 +24,9 @@ class HomeViewModel @Inject constructor(
     private val prayerTimesRepository: PrayerTimesRepository,
     private val dataStoreManager: DataStoreManager
 ) : ViewModel() {
+
+    private val appDateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT)
+    private val dbDateFormat = DateTimeFormatter.ofPattern("dd-MM-yyyy", Locale.ROOT)
 
     private val _selectedPrayer = MutableLiveData<Prayer>(Prayer.FAJR)
     val selectedPrayer: LiveData<Prayer> = _selectedPrayer
@@ -32,8 +36,7 @@ class HomeViewModel @Inject constructor(
 
 
     private val _selectedDate = MutableLiveData<String>().apply {
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        value = dateFormat.format(Calendar.getInstance().time)
+        value = LocalDate.now().format(appDateFormat)
     }
     val selectedDate: LiveData<String> = _selectedDate
 
@@ -66,31 +69,28 @@ class HomeViewModel @Inject constructor(
                 PrayerStatus.ON_TIME_ALONE -> updatePointsAndPercentage(1)
                 PrayerStatus.LATE_ALONE -> updatePointsAndPercentage(-2)
                 PrayerStatus.MISSED -> updatePointsAndPercentage(-4)
-                PrayerStatus.NONE -> TODO()
+                PrayerStatus.NONE -> {}
             }
 
-            val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Calendar.getInstance().time)
+            val today = LocalDate.now().format(appDateFormat)
             updateStreak(today)
         }
     }
 
     private suspend fun updatePointsAndPercentage(pointsDelta: Int) {
-        viewModelScope.launch {
+        val currentPoints = dataStoreManager.points.first()
+        dataStoreManager.setPoints(currentPoints + pointsDelta)
 
-            val currentPoints = dataStoreManager.points.first()
-            dataStoreManager.setPoints(currentPoints + pointsDelta)
+        val totalPrayers = prayerLogRepository.getTotalPrayerCount().first()
+        val groupPrayers = prayerLogRepository.getGroupPrayerCount().first()
 
-            val totalPrayers = prayerLogRepository.getTotalPrayerCount().first()
-            val groupPrayers = prayerLogRepository.getGroupPrayerCount().first()
-
-            val groupPercentage = if (totalPrayers > 0) {
-                (groupPrayers.toDouble() / totalPrayers * 100).toInt()
-            } else {
-                0
-            }
-
-            dataStoreManager.setGroupPercentage(groupPercentage)
+        val groupPercentage = if (totalPrayers > 0) {
+            (groupPrayers.toDouble() / totalPrayers * 100).toInt()
+        } else {
+            0
         }
+
+        dataStoreManager.setGroupPercentage(groupPercentage)
     }
 
 
@@ -119,10 +119,11 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun convertToDbDateFormat(appDate: String): String {
-        val appFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        val dbFormat = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-        val date = appFormat.parse(appDate) ?: return appDate
-        return dbFormat.format(date)
+        return try {
+            LocalDate.parse(appDate, appDateFormat).format(dbDateFormat)
+        } catch (e: Exception) {
+            appDate
+        }
     }
 
 
